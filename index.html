@@ -1,646 +1,83 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Ship, Crosshair, HelpCircle, Users, Trophy, Anchor, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
 
-
-const QUESTIONS = {
-  METAISPESADOS: [
-    { q: "Qual é a origem da expressão metais pesados?", type: "text" },
-    { q: "Quais elementos são frequentemente incluídos nessa classificação e por quê?", type: "text" },
-    { q: "Quais desses elementos podem estar presentes em diferentes tipos de pilhas e baterias?", type: "text" },
-    { q: "Como o descarte inadequado desses materiais pode contribuir para a contaminação do solo?", type: "text" }
-  ],
-  RSS: [
-    { q: "O que significa a sigla RSS e quais atividades podem gerar esses resíduos?", type: "text" },
-    { q: "Todos os resíduos produzidos em hospitais apresentam o mesmo grau de risco? Justifique.", type: "text" },
-    { q: "Se um hospital produz 2 toneladas de resíduos por mês, qual será a produção anual em quilogramas?", type: "math", answer: 24000 },
-    { q: "Como a análise desses dados pode contribuir para o planejamento de ações e destinação adequada?", type: "text" }
-  ],
-  CHORUME: [
-    { q: "O que é chorume e como ele se forma?", type: "text" },
-    { q: "Quais alterações podem ocorrer nas características do solo quando há infiltração de chorume?", type: "text" },
-    { q: "Como essa contaminação pode afetar microrganismos, plantas e outros seres vivos?", type: "text" },
-    { q: "Que medidas poderiam reduzir os riscos ambientais associados à formação e ao deslocamento do chorume?", type: "text" }
-  ]
-};
-
-
-const SHIPS_INFO = {
-  METAISPESADOS: { id: 'METAISPESADOS', color: 'bg-blue-600', letters: 'METAISPESADOS', size: 13, shape: 'bent' },
-  RSS: { id: 'RSS', color: 'bg-orange-500', letters: 'RSS', size: 3, shape: 'straight' },
-  CHORUME: { id: 'CHORUME', color: 'bg-green-600', letters: 'CHORUME', size: 7, shape: 'straight' }
-};
-
-
-const COLS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
-const ROWS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-
-// Helper to get coordinates based on shape and orientation
-const getShipCoordinates = (ship, startR, startC, isVertical) => {
-  let coords = [];
-  if (ship.shape === 'straight') {
-    for (let i = 0; i < ship.size; i++) {
-      coords.push({ r: isVertical ? startR + i : startR, c: isVertical ? startC : startC + i, letter: ship.letters[i] });
-    }
-  } else if (ship.shape === 'bent') {
-    // METAISPESADOS: 6 on top, 7 on bottom offset by 1
-    // M E T A I S
-    //   P E S A D O S
-    const top = "METAIS";
-    const bottom = "PESADOS";
-    for (let i = 0; i < top.length; i++) {
-      coords.push({ r: startR, c: startC + i, letter: top[i] });
-    }
-    for (let i = 0; i < bottom.length; i++) {
-      coords.push({ r: startR + 1, c: startC + 1 + i, letter: bottom[i] });
-    }
-  }
-  return coords;
-};
-
-
-const checkCollision = (coords, existingShips) => {
-  for (let coord of coords) {
-    if (coord.r >= 10 || coord.c >= 10 || coord.r < 0 || coord.c < 0) return true; // Out of bounds
-    for (let ship of existingShips) {
-      if (ship.coords.some(c => c.r === coord.r && c.c === coord.c)) return true; // Overlap
-    }
-  }
-  return false;
-};
-
-
-export default function App() {
-  const [screen, setScreen] = useState('home'); // home, setup, play, gameover
-  const [currentPlayer, setCurrentPlayer] = useState('P1');
-  const [players, setPlayers] = useState({
-    P1: { ships: [], shots: [], score: 0, completedChallenges: [] },
-    P2: { ships: [], shots: [], score: 0, completedChallenges: [] }
-  });
- 
-  const [setupShipIdx, setSetupShipIdx] = useState(0);
-  const [setupOrientation, setSetupOrientation] = useState(false); // false = horiz, true = vert
-  const [activeChallenge, setActiveChallenge] = useState(null);
-  const [message, setMessage] = useState('');
-
-
-  const [gameMode, setGameMode] = useState('local'); // 'local' ou 'ai'
-
-
-  const resetGame = () => {
-    setPlayers({
-      P1: { ships: [], shots: [], score: 0, completedChallenges: [] },
-      P2: { ships: [], shots: [], score: 0, completedChallenges: [] }
-    });
-    setCurrentPlayer('P1');
-    setSetupShipIdx(0);
-    setScreen('setup');
-  };
-
-
-  const handleSetupClick = (r, c) => {
-    const shipsList = Object.values(SHIPS_INFO);
-    if (setupShipIdx >= shipsList.length) return;
-   
-    const ship = shipsList[setupShipIdx];
-    const coords = getShipCoordinates(ship, r, c, setupOrientation);
-   
-    if (!checkCollision(coords, players[currentPlayer].ships)) {
-      setPlayers(prev => ({
-        ...prev,
-        [currentPlayer]: {
-          ...prev[currentPlayer],
-          ships: [...prev[currentPlayer].ships, { ...ship, coords, sunk: false, challengePassed: false }]
-        }
-      }));
-      setSetupShipIdx(prev => prev + 1);
-    } else {
-      setMessage("Posição inválida! Fora dos limites ou sobreposta.");
-      setTimeout(() => setMessage(''), 2000);
-    }
-  };
-
-
-  const confirmSetup = () => {
-    if (currentPlayer === 'P1') {
-      if (gameMode === 'ai') {
-        setupAIBoard();
-        setCurrentPlayer('P1');
-        setScreen('play');
-      } else {
-        setCurrentPlayer('P2');
-        setSetupShipIdx(0);
-      }
-    } else {
-      setCurrentPlayer('P1');
-      setScreen('play');
-    }
-  };
-
-
-  const setupAIBoard = () => {
-    const shipsList = Object.values(SHIPS_INFO);
-    let newShips = [];
-   
-    shipsList.forEach(ship => {
-      let placed = false;
-      while (!placed) {
-        const r = Math.floor(Math.random() * 10);
-        const c = Math.floor(Math.random() * 10);
-        const isVert = Math.random() > 0.5;
-        const coords = getShipCoordinates(ship, r, c, isVert);
-       
-        if (!checkCollision(coords, newShips)) {
-          newShips.push({ ...ship, coords, sunk: false, challengePassed: false });
-          placed = true;
-        }
-      }
-    });
-
-
-    setPlayers(prev => ({
-      ...prev,
-      P2: { ...prev.P2, ships: newShips }
-    }));
-  };
-
-
-  const autoPosition = () => {
-    const shipsList = Object.values(SHIPS_INFO);
-    let newShips = [];
-   
-    shipsList.forEach(ship => {
-      let placed = false;
-      while (!placed) {
-        const r = Math.floor(Math.random() * 10);
-        const c = Math.floor(Math.random() * 10);
-        const isVert = Math.random() > 0.5;
-        const coords = getShipCoordinates(ship, r, c, isVert);
-       
-        if (!checkCollision(coords, newShips)) {
-          newShips.push({ ...ship, coords, sunk: false, challengePassed: false });
-          placed = true;
-        }
-      }
-    });
-
-
-    setPlayers(prev => ({
-      ...prev,
-      [currentPlayer]: { ...prev[currentPlayer], ships: newShips }
-    }));
-    setSetupShipIdx(shipsList.length);
-  };
-
-
-  // Turno da IA
-  useEffect(() => {
-    if (screen === 'play' && gameMode === 'ai' && currentPlayer === 'P2' && !activeChallenge) {
-      const timer = setTimeout(() => {
-        let r, c;
-        let valid = false;
-        while (!valid) {
-          r = Math.floor(Math.random() * 10);
-          c = Math.floor(Math.random() * 10);
-          if (!players.P2.shots.some(s => s.r === r && s.c === c)) {
-            valid = true;
-          }
-        }
-        handleAttack(r, c);
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [screen, gameMode, currentPlayer, players.P2.shots, activeChallenge]);
-
-
-  const handleMathSubmit = (answer) => {
-    const val = parseInt(answer);
-    handleChallengeSubmit(val, val === activeChallenge.question.answer);
-  };
-
-
-  const handleAttack = (r, c) => {
-    if (activeChallenge) return; // Block attacks while challenge is active
-   
-    const opponent = currentPlayer === 'P1' ? 'P2' : 'P1';
-    const opponentData = players[opponent];
-   
-    // Check if already shot
-    if (players[currentPlayer].shots.some(s => s.r === r && s.c === c)) return;
-
-
-    let hitShip = null;
-    let hitLetter = '';
-   
-    // Check hit
-    for (let ship of opponentData.ships) {
-      const coord = ship.coords.find(sc => sc.r === r && sc.c === c);
-      if (coord) {
-        hitShip = ship;
-        hitLetter = coord.letter;
-        break;
-      }
-    }
-
-
-    const newShot = { r, c, isHit: !!hitShip, letter: hitLetter };
-    let newScore = players[currentPlayer].score;
-    let turnContinues = false;
-
-
-    if (hitShip) {
-      setMessage("Fogo! Acertou!");
-      newScore += 10;
-      turnContinues = true;
-     
-      // Check if ship is fully discovered
-      const shipShots = [...players[currentPlayer].shots, newShot].filter(s => s.isHit);
-      const isShipFullyHit = hitShip.coords.every(sc => shipShots.some(s => s.r === sc.r && s.c === sc.c));
-     
-      if (isShipFullyHit && !hitShip.sunk) {
-        if (currentPlayer === 'P2' && gameMode === 'ai') {
-          // IA afunda automaticamente e ganha os pontos sem precisar responder perguntas
-          setTimeout(() => {
-             handleChallengeSubmit("IA", true, hitShip.id);
-          }, 1000);
-        } else {
-          // Trigger Challenge para o jogador humano
-          const qIndex = Math.floor(Math.random() * QUESTIONS[hitShip.id].length);
-          setActiveChallenge({ ship: hitShip, question: QUESTIONS[hitShip.id][qIndex], qIndex });
-        }
-      }
-    } else {
-      setMessage("Água! Você não atingiu nenhuma embarcação.");
-      turnContinues = false;
-    }
-
-
-    setPlayers(prev => ({
-      ...prev,
-      [currentPlayer]: {
-        ...prev[currentPlayer],
-        shots: [...prev[currentPlayer].shots, newShot],
-        score: newScore
-      }
-    }));
-
-
-    setTimeout(() => {
-      setMessage('');
-      if (!turnContinues && !activeChallenge) {
-        setCurrentPlayer(opponent);
-      }
-    }, 1500);
-  };
-
-
-  const handleChallengeSubmit = (answer, isCorrect, aiTargetShipId = null) => {
-    const opponent = currentPlayer === 'P1' ? 'P2' : 'P1';
-    const targetShipId = aiTargetShipId || activeChallenge?.ship?.id;
-   
-    if (isCorrect) {
-      setMessage(aiTargetShipId ? `A IA afundou sua embarcação ${targetShipId}!` : `Desafio concluído! +150 pontos (${targetShipId} afundado)`);
-      setPlayers(prev => {
-        const pState = prev[currentPlayer];
-        const newScore = pState.score + 150; // 50 for ship + 100 for challenge
-        const completed = [...pState.completedChallenges, targetShipId];
-       
-        // Update opponent's ship state
-        const oppState = prev[opponent];
-        const updatedShips = oppState.ships.map(s => s.id === targetShipId ? {...s, sunk: true, challengePassed: true} : s);
-
-
-        return {
-          ...prev,
-          [currentPlayer]: { ...pState, score: newScore, completedChallenges: completed },
-          [opponent]: { ...oppState, ships: updatedShips }
-        };
-      });
-     
-      // Check win condition
-      if (players[currentPlayer].completedChallenges.length === 2) { // Just completed the 3rd
-        setTimeout(() => setScreen('gameover'), 2000);
-      } else {
-        setTimeout(() => setMessage(''), 2000);
-      }
-    } else {
-      setMessage("Resposta considerada incorreta pelo professor. Turno encerrado.");
-      setTimeout(() => setMessage(''), 3000);
-      setCurrentPlayer(opponent); // End turn if failed
-    }
-    setActiveChallenge(null);
-  };
-
-
-  const renderGrid = (isAttackBoard) => {
-    const boardData = isAttackBoard ? players[currentPlayer].shots : players[currentPlayer].ships;
-    const opponentData = currentPlayer === 'P1' ? players.P2 : players.P1;
-
-
-    return (
-      <div className="flex flex-col items-center">
-        <h3 className="text-xl font-bold text-white mb-2">{isAttackBoard ? 'Ataque (Adversário)' : 'Defesa (Sua Frota)'}</h3>
-        <div className="grid grid-cols-11 gap-1 bg-blue-900/50 p-2 rounded-lg border-2 border-blue-400">
-          <div className="w-8 h-8 flex items-center justify-center font-bold text-blue-200"></div>
-          {COLS.map(c => <div key={c} className="w-8 h-8 flex items-center justify-center font-bold text-blue-200">{c}</div>)}
-         
-          {ROWS.map(r => (
-            <React.Fragment key={`row-${r}`}>
-              <div className="w-8 h-8 flex items-center justify-center font-bold text-blue-200">{r}</div>
-              {COLS.map((c, cIdx) => {
-                let content = '';
-                let bgColor = 'bg-blue-300/30 hover:bg-blue-300/50';
-               
-                if (!isAttackBoard) {
-                  // Defense Board: Show own ships and opponent's shots
-                  const myShip = players[currentPlayer].ships.find(s => s.coords.some(coord => coord.r === r - 1 && coord.c === cIdx));
-                  if (myShip) {
-                    bgColor = myShip.color;
-                    const letter = myShip.coords.find(coord => coord.r === r - 1 && coord.c === cIdx).letter;
-                    content = <span className="text-white font-bold">{letter}</span>;
-                  }
-                 
-                  const oppShot = opponentData.shots.find(s => s.r === r - 1 && s.c === cIdx);
-                  if (oppShot) {
-                    content = oppShot.isHit ? <span className="text-red-500 text-2xl font-bold">X</span> : <span className="text-blue-500 text-2xl font-bold">O</span>;
-                  }
-                } else {
-                  // Attack Board: Show own shots
-                  const myShot = players[currentPlayer].shots.find(s => s.r === r - 1 && s.c === cIdx);
-                  if (myShot) {
-                    if (myShot.isHit) {
-                      bgColor = 'bg-red-500';
-                      content = <span className="text-white font-bold">{myShot.letter}</span>;
-                    } else {
-                      bgColor = 'bg-blue-800';
-                      content = <span className="text-blue-300">~</span>;
-                    }
-                  }
-                }
-
-
-                return (
-                  <div
-                    key={`${r}-${c}`}
-                    className={`w-8 h-8 flex items-center justify-center cursor-pointer transition-colors border border-blue-400/30 rounded-sm ${bgColor}`}
-                    onClick={() => {
-                      if (screen === 'setup' && !isAttackBoard) handleSetupClick(r - 1, cIdx);
-                      if (screen === 'play' && isAttackBoard) handleAttack(r - 1, cIdx);
-                    }}
-                  >
-                    {content}
-                  </div>
-                );
-              })}
-            </React.Fragment>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-
-  if (screen === 'home') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-cyan-800 to-blue-900 flex flex-col items-center justify-center p-4">
-        <div className="bg-white/10 p-8 rounded-2xl backdrop-blur-md shadow-2xl text-center max-w-lg w-full border border-white/20">
-          <Anchor className="w-24 h-24 text-blue-300 mx-auto mb-6 drop-shadow-lg" />
-          <h1 className="text-4xl font-extrabold text-white mb-2 drop-shadow-md">BATALHA NAVAL</h1>
-          <h2 className="text-2xl font-bold text-orange-400 mb-8 drop-shadow-md">CONTAMINAÇÃO DO SOLO</h2>
-         
-          <button
-            onClick={() => { setGameMode('local'); setScreen('setup'); }}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl mb-4 transition-all transform hover:scale-105 shadow-lg flex items-center justify-center gap-2"
-          >
-            <Users size={24} /> Jogar Local (Mesmo Dispositivo)
-          </button>
-
-
-          <button
-            onClick={() => { setGameMode('ai'); setScreen('setup'); }}
-            className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 px-6 rounded-xl mb-4 transition-all transform hover:scale-105 shadow-lg flex items-center justify-center gap-2"
-          >
-            <Crosshair size={24} /> Jogar contra Inteligência Artificial
-          </button>
-         
-          <p className="text-blue-200 mt-6 text-sm italic">O modo online requer configuração de servidor. Esta versão foca na experiência completa em modo local para garantir a jogabilidade pedagógica imediata.</p>
-        </div>
-      </div>
-    );
-  }
-
-
-  if (screen === 'setup') {
-    const isDone = setupShipIdx >= Object.keys(SHIPS_INFO).length;
-    const currentShip = !isDone ? Object.values(SHIPS_INFO)[setupShipIdx] : null;
-
-
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-cyan-800 to-blue-900 p-4 flex flex-col items-center">
-        <div className="w-full max-w-4xl flex justify-between items-center bg-black/30 p-4 rounded-xl mb-6">
-          <h2 className="text-2xl font-bold text-white">Preparação: Jogador {currentPlayer === 'P1' ? '1' : '2'}</h2>
-        </div>
-
-
-        {message && (
-          <div className="bg-red-500 text-white p-4 rounded-lg font-bold mb-4 animate-bounce">
-            {message}
-          </div>
-        )}
-
-
-        <div className="flex flex-col md:flex-row gap-8 items-start">
-          {renderGrid(false)}
-         
-          <div className="bg-white/10 p-6 rounded-xl backdrop-blur-sm border border-white/20 text-white min-w-[300px]">
-            <h3 className="text-xl font-bold mb-4 border-b border-white/20 pb-2">Instruções</h3>
-            {!isDone ? (
-              <>
-                <p className="mb-4">Posicione a embarcação:</p>
-                <div className={`p-4 rounded-lg mb-4 text-center font-bold tracking-widest ${currentShip.color}`}>
-                  {currentShip.id} ({currentShip.size})
-                </div>
-               
-                {currentShip.shape !== 'bent' && (
-                  <button
-                    onClick={() => setSetupOrientation(!setupOrientation)}
-                    className="w-full bg-blue-700/50 hover:bg-blue-600 py-2 rounded mb-4 flex items-center justify-center gap-2"
-                  >
-                    <RotateCcw size={18} /> Orientação: {setupOrientation ? 'Vertical' : 'Horizontal'}
-                  </button>
-                )}
-               
-                <p className="text-sm text-blue-200 mb-6">Clique no tabuleiro para posicionar ou use o botão abaixo.</p>
-                <button
-                  onClick={autoPosition}
-                  className="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded font-bold transition-colors"
-                >
-                  Posicionamento Automático
-                </button>
-              </>
-            ) : (
-              <div className="text-center">
-                <CheckCircle2 size={64} className="text-green-400 mx-auto mb-4" />
-                <p className="font-bold text-xl mb-6">Frota Posicionada!</p>
-                <button
-                  onClick={confirmSetup}
-                  className="w-full bg-green-500 hover:bg-green-400 text-white py-3 rounded-lg font-bold transition-colors shadow-lg"
-                >
-                  {currentPlayer === 'P1' ? 'Passar para Jogador 2' : 'Iniciar Partida!'}
-                </button>
-                <button
-                  onClick={() => {
-                    setPlayers(prev => ({...prev, [currentPlayer]: {...prev[currentPlayer], ships: []}}));
-                    setSetupShipIdx(0);
-                  }}
-                  className="w-full mt-2 bg-red-600/50 hover:bg-red-500/50 text-white py-2 rounded-lg font-bold transition-colors"
-                >
-                  Reposicionar
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-
-  if (screen === 'play') {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-cyan-800 to-blue-900 p-4">
-        {/* Header */}
-        <div className="max-w-6xl mx-auto flex justify-between items-center bg-black/40 p-4 rounded-xl mb-6 shadow-xl border border-white/10">
-          <div className={`p-4 rounded-lg font-bold ${currentPlayer === 'P1' ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(37,99,235,0.5)]' : 'bg-transparent text-blue-300 opacity-50'}`}>
-            Jogador 1 <br/><span className="text-2xl">{players.P1.score} pts</span>
-          </div>
-         
-          <div className="text-center text-white">
-            <h1 className="text-3xl font-black tracking-wider text-orange-400 drop-shadow-md">
-              TURNO: {currentPlayer === 'P1' ? 'JOGADOR 1' : (gameMode === 'ai' ? 'IA' : 'JOGADOR 2')}
-            </h1>
-            {message && <p className="text-xl font-bold bg-white/20 px-4 py-1 rounded-full mt-2 animate-pulse inline-block">{message}</p>}
-          </div>
-
-
-          <div className={`p-4 rounded-lg font-bold text-right ${currentPlayer === 'P2' ? 'bg-orange-600 text-white shadow-[0_0_15px_rgba(234,88,12,0.5)]' : 'bg-transparent text-orange-300 opacity-50'}`}>
-            {gameMode === 'ai' ? 'Inteligência Artificial' : 'Jogador 2'} <br/><span className="text-2xl">{players.P2.score} pts</span>
-          </div>
-        </div>
-
-
-        {/* Boards */}
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row gap-8 justify-center">
-          <div className="opacity-70 pointer-events-none transform scale-90 md:scale-100">
-            {renderGrid(false)}
-          </div>
-          <div className="transform scale-105 shadow-2xl rounded-xl">
-            {renderGrid(true)}
-          </div>
-        </div>
-
-
-        {/* Challenge Modal */}
-        {activeChallenge && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-            <div className="bg-slate-800 p-8 rounded-2xl max-w-2xl w-full border-4 border-blue-500 shadow-2xl text-white">
-              <div className="flex items-center gap-3 mb-6">
-                <HelpCircle className="w-10 h-10 text-orange-400" />
-                <h2 className="text-3xl font-black text-blue-300">Desafio Científico: <span className="text-white">{activeChallenge.ship.id}</span></h2>
-              </div>
-             
-              <div className="bg-slate-700 p-6 rounded-xl mb-6">
-                <p className="text-xl font-medium">{activeChallenge.question.q}</p>
-              </div>
-
-
-              {activeChallenge.question.type === 'math' ? (
-                <div>
-                  <input type="number" id="math-answer" className="w-full p-4 text-black text-xl rounded-lg mb-4 font-bold" placeholder="Digite o valor numérico..." />
-                  <button
-                    className="w-full bg-green-500 hover:bg-green-400 text-white font-bold py-4 rounded-xl text-lg transition-transform transform hover:scale-105 flex justify-center items-center gap-2 shadow-lg"
-                    onClick={() => handleMathSubmit(document.getElementById('math-answer').value)}
-                  >
-                    Confirmar Resposta Matemática
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <textarea id="text-answer" rows="4" className="w-full p-4 text-black rounded-lg mb-4 resize-none" placeholder="Escreva sua resposta e apresente ao professor/mediador para avaliação..."></textarea>
-                 
-                  <div className="pt-2">
-                    <p className="text-sm text-gray-300 mb-3 text-center">Apresente sua resposta ao professor para validação:</p>
-                    <div className="flex gap-4">
-                      <button
-                        className="flex-1 bg-green-600 hover:bg-green-500 text-white text-lg font-bold py-3 rounded-xl transition-transform transform hover:scale-105 shadow-lg flex justify-center items-center gap-2"
-                        onClick={() => handleChallengeSubmit(document.getElementById('text-answer').value, true)}
-                      >
-                        <CheckCircle2 size={20} /> Professor: Validar Acerto
-                      </button>
-                      <button
-                        className="flex-1 bg-red-600 hover:bg-red-500 text-white text-lg font-bold py-3 rounded-xl transition-transform transform hover:scale-105 shadow-lg flex justify-center items-center gap-2"
-                        onClick={() => handleChallengeSubmit(document.getElementById('text-answer').value, false)}
-                      >
-                        <AlertCircle size={20} /> Professor: Marcar Erro
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-
-  if (screen === 'gameover') {
-    const winner = players.P1.completedChallenges.length === 3 ? 'Jogador 1' : 'Jogador 2';
-   
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-cyan-900 to-blue-950 flex flex-col items-center justify-center p-4">
-        <div className="bg-black/40 p-10 rounded-3xl backdrop-blur-md shadow-2xl text-center max-w-2xl w-full border border-yellow-500/30">
-          <Trophy className="w-32 h-32 text-yellow-400 mx-auto mb-6 drop-shadow-[0_0_15px_rgba(250,204,21,0.6)]" />
-          <h1 className="text-5xl font-black text-white mb-2">Missão Concluída!</h1>
-          <h2 className="text-3xl font-bold text-yellow-400 mb-6">{winner} Venceu!</h2>
-         
-          <p className="text-lg text-blue-200 mb-8 italic px-8">
-            "Você investigou fontes potenciais de contaminação do solo e utilizou conhecimentos científicos para enfrentar os desafios!"
-          </p>
-
-
-          <div className="flex justify-around bg-white/5 p-6 rounded-xl mb-8 border border-white/10">
-            <div>
-              <p className="text-gray-400 uppercase text-sm font-bold">Jogador 1</p>
-              <p className="text-4xl font-black text-blue-400">{players.P1.score} <span className="text-xl font-normal">pts</span></p>
-            </div>
-            <div className="w-px bg-white/20"></div>
-            <div>
-              <p className="text-gray-400 uppercase text-sm font-bold">Jogador 2</p>
-              <p className="text-4xl font-black text-orange-400">{players.P2.score} <span className="text-xl font-normal">pts</span></p>
-            </div>
-          </div>
-
-
-          <div className="bg-slate-800 p-6 rounded-xl mb-8 text-left border border-blue-500/30">
-            <h3 className="text-orange-400 font-bold mb-2 flex items-center gap-2"><AlertCircle size={20}/> Reflexão Final:</h3>
-            <p className="text-white">Como os conhecimentos de Biologia, Matemática e Química podem contribuir para compreender e reduzir os impactos da contaminação do solo?</p>
-          </div>
-
-
-          <button
-            onClick={resetGame}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-10 rounded-full text-xl shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-transform transform hover:scale-105"
-          >
-            Jogar Novamente
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-
-  return null;
-}
-
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batalha Naval — Contaminação do Solo</title>
+<style>
+:root{--blue:#2563eb;--navy:#172554;--orange:#ea580c;--green:#15803d;--red:#b91c1c}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#0e7490,#172554);color:#fff;font:16px Arial,sans-serif}
+main{max-width:1100px;margin:auto;padding:16px}.panel{background:#ffffff18;border:1px solid #ffffff35;border-radius:16px;padding:18px;margin:12px 0}
+h1{margin:0 0 6px}h2,h3{margin-top:0}.muted{color:#dbeafe;font-size:.93rem}.hidden{display:none!important}
+button{border:0;border-radius:9px;padding:11px 14px;margin:4px;background:var(--blue);color:#fff;font-weight:700;cursor:pointer}
+button:hover{filter:brightness(1.1)}button:disabled{opacity:.5;cursor:not-allowed}.orange{background:var(--orange)}.green{background:var(--green)}.red{background:var(--red)}.gray{background:#475569}
+.row{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}.boardbox{min-width:0;overflow:auto}.grid{display:grid;grid-template-columns:repeat(11,32px);gap:2px;width:max-content;background:#1e3a8a;padding:5px;border-radius:8px}.cell,.axis{width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:12px}.axis{color:#dbeafe}.cell{padding:0;margin:0;border-radius:3px;background:#93c5fd;color:#082f49;border:1px solid #60a5fa}.ship{background:#15803d;color:white}.hit{background:#dc2626;color:white}.miss{background:#1e40af;color:#dbeafe}.status{min-height:22px;font-weight:bold}.scores{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.modal{position:fixed;inset:0;background:#000c;display:flex;align-items:center;justify-content:center;padding:14px;z-index:10}.modalbox{width:min(700px,100%);max-height:92vh;overflow:auto;background:#1e293b;border:2px solid #60a5fa;border-radius:16px;padding:22px}textarea{width:100%;padding:12px;border-radius:8px;border:1px solid #94a3b8;font:inherit;resize:vertical;color:#111827}.action-buttons{display:flex;gap:8px;flex-wrap:wrap}.action-buttons button{flex:1;min-width:190px}.feedback{padding:12px;background:#0f172a;border-radius:8px;white-space:pre-wrap}.small{font-size:.88rem}
+@media(max-width:600px){main{padding:7px}.panel{padding:12px}.grid{grid-template-columns:repeat(11,27px)}.cell,.axis{width:27px;height:27px}.modalbox{padding:15px}}
+</style></head>
+<body><main>
+<section id="home" class="panel">
+<h1>⚓ BATALHA NAVAL</h1><h2 style="color:#fdba74">CONTAMINAÇÃO DO SOLO</h2>
+<p>Afunde as embarcações e responda aos desafios científicos sobre metais pesados, resíduos de serviços de saúde (RSS) e chorume.</p>
+<p class="muted">Jogo para dois jogadores no mesmo dispositivo. Nas perguntas abertas, o(a) professor(a) registra a avaliação usando um dos dois botões.</p>
+<button id="start">Iniciar partida</button>
+</section>
+<section id="setup" class="panel hidden">
+<h2 id="setupTitle">Preparação</h2><p id="setupInfo"></p>
+<div class="row"><div class="boardbox"><h3>Posicionamento da frota</h3><div id="setupGrid" class="grid"></div></div>
+<div style="max-width:340px"><p id="setupMsg" class="status"></p><button id="auto" class="orange">Posicionar frota automaticamente</button><button id="confirm" class="green">Confirmar frota</button><button id="clear" class="gray">Limpar frota</button><p class="muted small">Você pode posicionar cada embarcação clicando na primeira célula. A frota também pode ser posicionada automaticamente.</p></div></div>
+</section>
+<section id="play" class="hidden">
+<div class="panel scores"><div><strong>Jogador 1</strong><div id="score1">0 pontos</div></div><div><h2 id="turn">Turno: Jogador 1</h2><div id="status" class="status"></div></div><div><strong>Jogador 2</strong><div id="score2">0 pontos</div></div></div>
+<div class="row"><div class="panel boardbox"><h3>Defesa — sua frota</h3><div id="defGrid" class="grid"></div></div><div class="panel boardbox"><h3>Ataque — adversário</h3><div id="attackGrid" class="grid"></div></div></div>
+</section>
+<section id="over" class="panel hidden"><h1>🏆 Partida concluída!</h1><h2 id="winner"></h2><button onclick="location.reload()">Jogar novamente</button></section>
+</main>
+<div id="challenge" class="modal hidden"><div class="modalbox">
+<h2 id="challengeTitle">Desafio científico</h2><p id="question"></p>
+<label for="answer"><strong>Resposta do estudante</strong></label><textarea id="answer" rows="4" placeholder="Registre aqui a resposta do estudante (opcional)."></textarea>
+<p class="muted small">Após analisar a resposta, o(a) professor(a) deve selecionar uma das opções abaixo.</p>
+<div class="action-buttons"><button id="teacherOK" class="green">Professor avaliou!</button><button id="teacherNo" class="red">Professor identificou equívocos!</button></div>
+<div id="feedback" class="feedback hidden"></div><button id="continue" class="hidden">Continuar partida</button>
+</div></div>
+<script>
+const COLS='ABCDEFGHIJ'.split('');
+const FLEET=[
+{id:'METAISPESADOS',letters:'METAISPESADOS',shape:'bent'},
+{id:'RSS',letters:'RSS',shape:'straight'},
+{id:'CHORUME',letters:'CHORUME',shape:'straight'}
+];
+const QUESTIONS={
+METAISPESADOS:[
+'Qual é a origem da expressão metais pesados?',
+'Quais elementos são frequentemente incluídos nessa classificação e por quê?',
+'Quais desses elementos podem estar presentes em diferentes tipos de pilhas e baterias?',
+'Como o descarte inadequado desses materiais pode contribuir para a contaminação do solo?'
+],
+RSS:[
+'O que significa a sigla RSS e quais atividades podem gerar esses resíduos?',
+'Todos os resíduos produzidos em hospitais apresentam o mesmo grau de risco? Justifique.',
+'Se um hospital produz 2 toneladas de resíduos por mês, qual será a produção anual em quilogramas?',
+'Como a análise desses dados pode contribuir para o planejamento de ações e destinação adequada?'
+],
+CHORUME:[
+'O que é chorume e como ele se forma?',
+'Quais alterações podem ocorrer nas características do solo quando há infiltração de chorume?',
+'Como essa contaminação pode afetar microrganismos, plantas e outros seres vivos?',
+'Que medidas poderiam reduzir os riscos ambientais associados à formação e ao deslocamento do chorume?'
+]};
+let players={},current='P1',setupShips=[],challenge=null;
+const $=id=>document.getElementById(id);
+function show(id){['home','setup','play','over'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
+function newPlayer(){return{ships:[],shots:[],score:0,done:[]}}
+function shipCoords(s,r,c){if(s.shape==='bent')return [...'METAIS'].map((letter,i)=>({r,c:c+i,letter})).concat([... 'PESADOS'].map((letter,i)=>({r:r+1,c:c+i+1,letter})));return [...s.letters].map((letter,i)=>({r,c:c+i,letter}))}
+function collides(cs,ships){return cs.some(p=>p.r<0||p.r>9||p.c<0||p.c>9||ships.some(s=>s.coords.some(q=>q.r===p.r&&q.c===p.c)))}
+function randomFleet(){let placed=[];for(const s of FLEET){let ok=false,tries=0;while(!ok&&tries++<3000){let r=Math.floor(Math.random()*10),c=Math.floor(Math.random()*10),cs=shipCoords(s,r,c);if(!collides(cs,placed)){placed.push({...s,coords:cs,sunk:false});ok=true}}}return placed}
+function drawGrid(id,mode){let html='<div class="axis"></div>'+COLS.map(c=>`<div class="axis">${c}</div>`).join('');for(let r=0;r<10;r++){html+=`<div class="axis">${r+1}</div>`;for(let c=0;c<10;c++){let own=players[current].ships.find(s=>s.coords.some(p=>p.r===r&&p.c===c)),shot=players[current].shots.find(s=>s.r===r&&s.c===c),opp=players[current==='P1'?'P2':'P1'],oppshot=opp.shots.find(s=>s.r===r&&s.c===c),txt='',cl='cell';if(mode==='setup'&&own){cl+=' ship';txt=own.coords.find(p=>p.r===r&&p.c===c).letter}if(mode==='def'){if(own){cl+=' ship';txt=own.coords.find(p=>p.r===r&&p.c===c).letter}if(oppshot){cl+=oppshot.hit?' hit':' miss';txt=oppshot.hit?'X':'O'}}if(mode==='attack'&&shot){cl+=shot.hit?' hit':' miss';txt=shot.hit?shot.letter:'~'}html+=`<button class="${cl}" data-r="${r}" data-c="${c}" ${mode==='attack'&&shot?'disabled':''}>${txt}</button>`}}$(id).innerHTML=html;$(id).querySelectorAll('button[data-r]').forEach(b=>b.onclick=()=>mode==='setup'?setupCell(+b.dataset.r,+b.dataset.c):attack(+b.dataset.r,+b.dataset.c))}
+function renderSetup(){show('setup');$('setupTitle').textContent='Preparação — '+(current==='P1'?'Jogador 1':'Jogador 2');$('setupInfo').textContent=setupShips.length<3?'Posicione a embarcação: '+FLEET[setupShips.length].id:'Frota pronta. Confirme para continuar.';$('setupMsg').textContent=`Embarcações posicionadas: ${setupShips.length} de 3`;$('confirm').disabled=setupShips.length!==3;drawGrid('setupGrid','setup')}
+function setupCell(r,c){if(setupShips.length>=3)return;let s=FLEET[setupShips.length],cs=shipCoords(s,r,c);if(collides(cs,setupShips)){$('setupMsg').textContent='Posição inválida. Escolha outra célula.';return}setupShips.push({...s,coords:cs,sunk:false});renderSetup()}
+function begin(){players={P1:newPlayer(),P2:newPlayer()};current='P1';setupShips=[];renderSetup()}
+function renderPlay(){show('play');$('turn').textContent='Turno: '+(current==='P1'?'Jogador 1':'Jogador 2');$('score1').textContent=players.P1.score+' pontos';$('score2').textContent=players.P2.score+' pontos';drawGrid('defGrid','def');drawGrid('attackGrid','attack')}
+function attack(r,c){if(challenge)return;let other=current==='P1'?'P2':'P1',ship=players[other].ships.find(s=>s.coords.some(p=>p.r===r&&p.c===c));let shot={r,c,hit:!!ship,letter:ship?ship.coords.find(p=>p.r===r&&p.c===c).letter:''};players[current].shots.push(shot);if(!ship){$('status').textContent='Água! O turno passa para o outro jogador.';current=other;renderPlay();return}players[current].score+=10;$('status').textContent='Acertou uma embarcação!';let sunk=ship.coords.every(p=>players[current].shots.some(s=>s.r===p.r&&s.c===p.c&&s.hit));if(sunk&&!ship.sunk&&!players[current].done.includes(ship.id)){challenge={ship,question:QUESTIONS[ship.id][Math.floor(Math.random()*QUESTIONS[ship.id].length)]};$('challengeTitle').textContent='Desafio científico: '+ship.id;$('question').textContent=challenge.question;$('answer').value='';$('feedback').classList.add('hidden');$('teacherOK').classList.remove('hidden');$('teacherNo').classList.remove('hidden');$('continue').classList.add('hidden');$('challenge').classList.remove('hidden')}renderPlay()}
+function recordEvaluation(accepted){let message=accepted?'Professor avaliou! A resposta foi considerada adequada.':'Professor identificou equívocos! A resposta precisa ser retomada ou aprimorada.';$('feedback').textContent=message;$('feedback').classList.remove('hidden');$('teacherOK').classList.add('hidden');$('teacherNo').classList.add('hidden');$('continue').classList.remove('hidden');$('continue').onclick=()=>{let other=current==='P1'?'P2':'P1';if(accepted){players[current].score+=150;players[current].done.push(challenge.ship.id);players[other].ships.find(s=>s.id===challenge.ship.id).sunk=true}else{current=other}$('challenge').classList.add('hidden');challenge=null;if(players.P1.done.length===3||players.P2.done.length===3){show('over');$('winner').textContent=(players.P1.done.length===3?'Jogador 1':'Jogador 2')+' venceu!'}else renderPlay()}}
+$('start').onclick=begin;$('auto').onclick=()=>{setupShips=randomFleet();renderSetup()};$('clear').onclick=()=>{setupShips=[];renderSetup()};$('confirm').onclick=()=>{if(setupShips.length!==3)return;players[current].ships=setupShips;if(current==='P1'){current='P2';setupShips=[];renderSetup()}else{current='P1';renderPlay()}};$('teacherOK').onclick=()=>recordEvaluation(true);$('teacherNo').onclick=()=>recordEvaluation(false);show('home');
+</script></body></html>
